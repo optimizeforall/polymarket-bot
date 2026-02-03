@@ -204,12 +204,25 @@ polymarket-bot/
 
 ## 🔍 Monitoring
 
+### Quick Status Check
+```bash
+python check_status.py
+# OR
+./check_bot.sh
+```
+
+Shows:
+- Process status (running/stopped, uptime)
+- Current balance (from blockchain)
+- Recent trades (last 5)
+- Recent log output (last 15 lines)
+
 ### View Logs
 ```bash
 tail -f logs/overnight.log
 ```
 
-### Check Bot Status
+### Check Bot Process
 ```bash
 ps aux | grep live_trader
 ```
