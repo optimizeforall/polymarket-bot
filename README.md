@@ -232,9 +232,29 @@ ps aux | grep live_trader
 kill $(cat bot.pid)
 ```
 
+### Telegram Status Bot
+
+Check bot status via Telegram commands:
+
+**Start the status bot:**
+```bash
+python telegram_status_bot.py
+# OR (background)
+./start_telegram_status.sh
+```
+
+**Available Commands:**
+- `/status` - Full bot status (process, balance, trades, activity)
+- `/balance` - Quick balance check
+- `/trades` - Recent trades list
+- `/logs` - Recent log output
+- `/help` - Show all commands
+
+The status bot runs independently and can monitor your trading bot 24/7.
+
 ### Telegram Notifications
 
-The bot sends notifications for:
+The trading bot sends automatic notifications for:
 - Bot startup/shutdown
 - Trade executions (with order ID, size, price)
 - Hourly summaries (balance, P&L, trade count)
