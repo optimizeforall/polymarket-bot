@@ -1,66 +1,113 @@
-# Polymarket BTC Price Logger
+# Polymarket BTC Trading Bot
 
-A Python bot that logs Bitcoin (BTC) price data to CSV with support for multiple API sources including Chainlink Data Streams (same as Polymarket uses).
+A Python bot for automated BTC prediction market trading on Polymarket, with real-time price logging, technical indicators, and signal generation.
+
+## Project Structure
+
+```
+polymarket-bot/
+├── main.py                 # Entry point - BTC price logger
+├── requirements.txt        # Python dependencies
+├── README.md
+│
+├── src/                    # Source code
+│   ├── core/               # Core functionality
+│   │   ├── fetcher.py      # Multi-source BTC price fetching
+│   │   └── logger.py       # CSV logging with session tracking
+│   │
+│   ├── trading/            # Trading logic
+│   │   ├── indicators.py   # RSI, VWAP, momentum calculations
+│   │   ├── signal_generator.py  # Buy/Sell/Hold signal generation
+│   │   └── paper_trader.py # Paper trading simulation
+│   │
+│   └── utils/              # Utility modules
+│
+├── data/                   # Data files
+│   ├── btc_prices.csv      # Historical price data
+│   └── signals.csv         # Generated trading signals
+│
+├── services/               # System services
+│   ├── btc-logger.service  # Systemd service for auto-restart
+│   └── setup-service.sh    # Service installation script
+│
+└── docs/                   # Documentation
+    ├── plans/              # Project plans
+    │   ├── plan.md         # Full implementation guide
+    │   ├── plan-kimi.md    # Simplified trading plan
+    │   └── todo.md         # Task list
+    └── SETUP_PLAN.md       # Setup instructions
+```
 
 ## Features
 
-- Fetches BTC price from multiple APIs with automatic fallback
-- Logs price data to CSV with timestamps, volume, and latency
-- 15-minute interval tracking in UTC-5 timezone
-- Session tracking
-- Colored CLI output with price trend indicators
-- Real-time price updates with accurate timestamp spacing
+- **Multi-source price fetching** - CryptoCompare, Chainlink, Binance, CoinCap, CoinGecko
+- **Technical indicators** - RSI, VWAP, momentum
+- **Signal generation** - Buy/Sell/Hold based on indicator convergence
+- **Paper trading** - Test strategies without real money
+- **Auto-restart service** - Systemd service keeps logger running 24/7
+- **Session tracking** - Organize data by trading sessions
+- **Colored CLI output** - Visual price trends
 
-## Setup
+## Quick Start
 
-1. Create a virtual environment:
-```bash
-python -m venv venv
-```
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-2. Activate the virtual environment:
-```bash
-# Windows PowerShell
-venv\Scripts\Activate.ps1
+2. **Run the price logger:**
+   ```bash
+   python main.py
+   ```
 
-# Windows CMD
-venv\Scripts\activate.bat
+3. **Install as a service (auto-restart):**
+   ```bash
+   sudo ./services/setup-service.sh
+   ```
 
-# Mac/Linux
-source venv/bin/activate
-```
+## Components
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+### Price Logger (`main.py`)
+Fetches BTC price every 5 seconds and logs to CSV.
 
-## Usage
+### Signal Generator (`src/trading/signal_generator.py`)
+Generates trading signals based on:
+- Price vs VWAP deviation (>0.15%)
+- RSI levels (50-70 for buy, 30-50 for sell)
+- Momentum direction
 
-Run the main script:
-```bash
-python main.py
-```
-
-The bot will:
-- Fetch BTC price every second (configurable in `main.py`)
-- Log data to `btc_prices.csv`
-- Display colored output with price trends
-- Continue until stopped with Ctrl+C
+### Paper Trader (`src/trading/paper_trader.py`)
+Simulates trades without real money to validate strategies.
 
 ## Data Format
 
-CSV columns:
-- `id`: Session ID (same for all entries in a session)
-- `interval`: 15-minute interval end time in UTC-5 (e.g., "03:30")
-- `timestamp`: Full ISO timestamp (UTC)
-- `price`: BTC price in USD
-- `volume_24h`: 24-hour trading volume in USD
-- `fetch_latency_ms`: API response time in milliseconds
+CSV columns in `data/btc_prices.csv`:
+- `id`: Session ID
+- `interval`: 15-minute interval (UTC-5)
+- `timestamp`: ISO timestamp (UTC)
+- `price`: BTC/USD price
+- `volume_24h`: 24h trading volume
+- `fetch_latency_ms`: API response time
+
+## Service Management
+
+```bash
+# Check status
+sudo systemctl status btc-logger
+
+# View logs
+sudo journalctl -u btc-logger -f
+
+# Restart
+sudo systemctl restart btc-logger
+
+# Stop
+sudo systemctl stop btc-logger
+```
 
 ## API Sources
 
-The bot tries APIs in this order:
+Price data is fetched from (in order of priority):
 1. CryptoCompare (primary - includes volume)
 2. Chainlink (on-chain via web3.py)
 3. Binance
@@ -70,4 +117,5 @@ The bot tries APIs in this order:
 ## Requirements
 
 - Python 3.8+
-- See `requirements.txt` for dependencies
+- Ubuntu/Linux for systemd service
+- See `requirements.txt` for Python dependencies

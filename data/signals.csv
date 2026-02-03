@@ -1,0 +1,4 @@
+timestamp,signal,confidence,position_size,price,rsi,vwap_deviation_pct,momentum_60s,data_points,entry_window_open,reasons
+2026-02-02T22:27:38.127267+00:00Z,HOLD,MEDIUM,0.0,78610.0261610876,53.88,-0.042,0.0114,175,False,"Too late (minute 12, cutoff was minute 10); VWAP neutral (-0.04%); RSI bullish (53.9); Momentum positive (+0.011%); Signal generated but entry window closed"
+2026-02-02T22:28:10.924021+00:00Z,HOLD,MEDIUM,0.0,78612.7247295768,44.23,-0.03,-0.0103,174,False,"Too late (minute 13, cutoff was minute 10); VWAP neutral (-0.03%); RSI bearish (44.2); Momentum negative (-0.010%); Signal generated but entry window closed"
+2026-02-02T22:29:27.433876+00:00Z,HOLD,LOW,0.0,78610.0168584368,49.72,-0.016,-0.0011,174,False,"Too late (minute 14, cutoff was minute 10); VWAP neutral (-0.02%); RSI bearish (49.7); Momentum flat (-0.001%); Mixed signals: 0 buy, 1 sell"
