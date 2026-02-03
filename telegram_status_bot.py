@@ -56,7 +56,7 @@ def check_process():
         return None, False, f"Error: {e}"
 
 def format_uptime(etime_str):
-    """Format ps etime output to readable format"""
+    """Format ps etime output to simple hours and minutes only"""
     if etime_str == 'N/A' or not etime_str:
         return 'N/A'
     
@@ -64,13 +64,18 @@ def format_uptime(etime_str):
     parts = etime_str.split(':')
     
     if len(parts) == 2:
-        # mm:ss format
-        minutes, seconds = parts
-        return f"{int(minutes)}m {int(seconds)}s"
+        # mm:ss format - convert to hours and minutes
+        minutes = int(parts[0])
+        hours = minutes // 60
+        mins = minutes % 60
+        if hours > 0:
+            return f"{hours}h {mins}m"
+        else:
+            return f"{mins}m"
     elif len(parts) == 3:
-        # hh:mm:ss format
+        # hh:mm:ss format - just use hours and minutes
         hours, minutes, seconds = parts
-        return f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
+        return f"{int(hours)}h {int(minutes)}m"
     elif '-' in etime_str:
         # DD-hh:mm:ss format
         day_part, time_part = etime_str.split('-', 1)
@@ -78,7 +83,8 @@ def format_uptime(etime_str):
         time_parts = time_part.split(':')
         if len(time_parts) == 3:
             hours, minutes, seconds = time_parts
-            return f"{days}d {int(hours)}h {int(minutes)}m"
+            total_hours = (days * 24) + int(hours)
+            return f"{total_hours}h {int(minutes)}m"
     return etime_str
 
 def get_recent_logs(lines=10):
