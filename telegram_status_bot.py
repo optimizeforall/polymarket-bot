@@ -33,23 +33,19 @@ def check_process():
     try:
         pid = int(BOT_PID_FILE.read_text().strip())
         
-        # Get process start time
+        # Get elapsed time only
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "pid,lstart,etime"],
+            ["ps", "-p", str(pid), "-o", "etime="],
             capture_output=True,
             text=True
         )
         
         if result.returncode == 0:
-            lines = result.stdout.strip().split('\n')
-            if len(lines) > 1:
-                info = lines[1].split()
-                if len(info) >= 2:
-                    # Get elapsed time (session uptime)
-                    etime = ' '.join(info[2:]) if len(info) > 2 else 'N/A'
-                    # Format uptime nicely
-                    uptime_formatted = format_uptime(etime)
-                    return pid, True, f"Running (PID: {pid}, Uptime: {uptime_formatted})"
+            etime = result.stdout.strip()
+            if etime:
+                # Format uptime nicely
+                uptime_formatted = format_uptime(etime)
+                return pid, True, f"Running (PID: {pid}, Uptime: {uptime_formatted})"
         
         return pid, False, "Process not found (may have crashed)"
     except Exception as e:

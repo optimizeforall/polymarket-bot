@@ -62,20 +62,16 @@ def check_process():
         pid = int(BOT_PID_FILE.read_text().strip())
         # Check if process exists and get elapsed time
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "pid,etime"],
+            ["ps", "-p", str(pid), "-o", "etime="],
             capture_output=True,
             text=True
         )
         
         if result.returncode == 0:
-            lines = result.stdout.strip().split('\n')
-            if len(lines) > 1:
-                # Process is running
-                info = lines[1].split()
-                if len(info) >= 2:
-                    etime = ' '.join(info[1:])
-                    uptime_formatted = format_uptime(etime)
-                    return pid, f"Running (PID: {pid}, Uptime: {uptime_formatted})"
+            etime = result.stdout.strip()
+            if etime:
+                uptime_formatted = format_uptime(etime)
+                return pid, f"Running (PID: {pid}, Uptime: {uptime_formatted})"
         
         return pid, "Process not found (may have crashed)"
     except Exception as e:
