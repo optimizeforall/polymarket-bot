@@ -1,47 +1,86 @@
 """
-signal_generator.py - Trading signal generation for BTC 15-min prediction markets
+signal_generator.py - Trading signal generation for BTC 15-min and 30-min prediction markets
 
 Generates BUY (Up), SELL (Down), or HOLD signals based on:
 1. Price vs VWAP deviation
 2. RSI levels
 3. Momentum direction
 4. (Future) Smart money consensus
+
+Supports both 15-minute and 30-minute trading intervals.
 """
 
 import json
 import csv
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
-from indicators import get_current_indicators
+
+# Try relative import first, then absolute
+try:
+    from .indicators import get_current_indicators
+except ImportError:
+    from indicators import get_current_indicators
 
 # Configuration
 VWAP_THRESHOLD = 0.15  # % deviation required
 RSI_BUY_RANGE = (50, 70)
 RSI_SELL_RANGE = (30, 50)
 MOMENTUM_THRESHOLD = 0.01  # % per 60 seconds
-MIN_DATA_POINTS = 30  # Minimum data points for valid signal
+MIN_DATA_POINTS_15M = 30  # Minimum data points for 15-min mode
+MIN_DATA_POINTS_30M = 60  # Minimum data points for 30-min mode
 
 # Timing constraints (within 15-min window)
-MIN_ENTRY_MINUTE = 2  # Don't enter before minute 2
-MAX_ENTRY_MINUTE = 10  # Don't enter after minute 10
+MIN_ENTRY_MINUTE_15M = 2  # Don't enter before minute 2
+MAX_ENTRY_MINUTE_15M = 10  # Don't enter after minute 10
+
+# Timing constraints (within 30-min window)
+MIN_ENTRY_MINUTE_30M = 3  # Don't enter before minute 3
+MAX_ENTRY_MINUTE_30M = 20  # Don't enter after minute 20
 
 
-def get_current_interval_minute() -> int:
-    """Get the current minute within the 15-min interval (0-14)."""
-    now = datetime.now(timezone.utc)
-    return now.minute % 15
-
-
-def is_entry_window_open() -> Tuple[bool, str]:
-    """Check if we're in the valid entry window (minutes 2-10)."""
-    minute = get_current_interval_minute()
+def get_current_interval_minute(interval_minutes: int = 15) -> int:
+    """
+    Get the current minute within the specified interval.
     
-    if minute < MIN_ENTRY_MINUTE:
-        return False, f"Too early (minute {minute}, wait for minute {MIN_ENTRY_MINUTE})"
-    elif minute > MAX_ENTRY_MINUTE:
-        return False, f"Too late (minute {minute}, cutoff was minute {MAX_ENTRY_MINUTE})"
+    Args:
+        interval_minutes: 15 or 30 for 15-min or 30-min intervals
+    
+    Returns:
+        Current minute within the interval (0 to interval_minutes-1)
+    """
+    now = datetime.now(timezone.utc)
+    return now.minute % interval_minutes
+
+
+def is_entry_window_open(interval_minutes: int = 15) -> Tuple[bool, str]:
+    """
+    Check if we're in the valid entry window.
+    
+    Args:
+        interval_minutes: 15 or 30 for 15-min or 30-min intervals
+    
+    Returns:
+        Tuple of (is_open: bool, message: str)
+    """
+    minute = get_current_interval_minute(interval_minutes)
+    
+    if interval_minutes == 15:
+        min_entry = MIN_ENTRY_MINUTE_15M
+        max_entry = MAX_ENTRY_MINUTE_15M
+        interval_name = "15-min"
+    elif interval_minutes == 30:
+        min_entry = MIN_ENTRY_MINUTE_30M
+        max_entry = MAX_ENTRY_MINUTE_30M
+        interval_name = "30-min"
     else:
-        return True, f"Entry window open (minute {minute})"
+        return False, f"Invalid interval: {interval_minutes} (must be 15 or 30)"
+    
+    if minute < min_entry:
+        return False, f"Too early (minute {minute}/{interval_minutes}, wait for minute {min_entry})"
+    elif minute > max_entry:
+        return False, f"Too late (minute {minute}/{interval_minutes}, cutoff was minute {max_entry})"
+    else:
+        return True, f"Entry window open ({interval_name}, minute {minute}/{interval_minutes})"
 
 
 def calculate_confidence(signals_aligned: int, total_signals: int = 3) -> str:
@@ -74,17 +113,22 @@ def get_position_size(confidence: str, base_size: float = 0.10) -> float:
     return sizes.get(confidence, 0.0)
 
 
-def generate_signal(indicators: Dict, smart_money_direction: Optional[str] = None) -> Dict:
+def generate_signal(indicators: Dict, smart_money_direction: Optional[str] = None, 
+                   interval_minutes: int = 15) -> Dict:
     """
     Generate trading signal from indicators.
     
     Args:
         indicators: Dict from get_current_indicators()
         smart_money_direction: Optional 'UP', 'DOWN', or None
+        interval_minutes: 15 or 30 for 15-min or 30-min trading intervals
     
     Returns:
         Dict with signal details
     """
+    if interval_minutes not in [15, 30]:
+        raise ValueError(f"interval_minutes must be 15 or 30, got {interval_minutes}")
+    
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "signal": "HOLD",
@@ -93,7 +137,8 @@ def generate_signal(indicators: Dict, smart_money_direction: Optional[str] = Non
         "reasons": [],
         "indicators": {},
         "entry_window": None,
-        "error": None
+        "error": None,
+        "interval_minutes": interval_minutes
     }
     
     # Check for errors
@@ -104,13 +149,14 @@ def generate_signal(indicators: Dict, smart_money_direction: Optional[str] = Non
     
     # Check data quality
     data_points = indicators.get("data_points", 0)
-    if data_points < MIN_DATA_POINTS:
-        result["error"] = f"Insufficient data ({data_points} < {MIN_DATA_POINTS})"
+    min_required = MIN_DATA_POINTS_15M if interval_minutes == 15 else MIN_DATA_POINTS_30M
+    if data_points < min_required:
+        result["error"] = f"Insufficient data ({data_points} < {min_required} for {interval_minutes}-min mode)"
         result["reasons"].append(result["error"])
         return result
     
     # Check entry window
-    window_open, window_msg = is_entry_window_open()
+    window_open, window_msg = is_entry_window_open(interval_minutes)
     result["entry_window"] = {"open": window_open, "message": window_msg}
     
     if not window_open:
@@ -208,6 +254,7 @@ def generate_signal(indicators: Dict, smart_money_direction: Optional[str] = Non
 def format_signal_message(signal: Dict) -> str:
     """Format signal for Telegram notification."""
     timestamp = signal.get("timestamp", "")[:19].replace("T", " ")
+    interval = signal.get("interval_minutes", 15)
     
     emoji_map = {
         "BUY": "🟢",
@@ -223,7 +270,7 @@ def format_signal_message(signal: Dict) -> str:
     vwap_dev = ind.get("vwap_deviation_pct", 0)
     momentum = ind.get("momentum_60s", 0)
     
-    msg = f"""{emoji} **{signal['signal']}** | {signal['confidence']} confidence
+    msg = f"""{emoji} **{signal['signal']}** | {signal['confidence']} confidence | {interval}-min mode
 
 📊 **Indicators:**
 • Price: ${price:,.2f}
@@ -247,7 +294,7 @@ def log_signal(signal: Dict, filepath: str = "data/signals.csv"):
     fieldnames = [
         "timestamp", "signal", "confidence", "position_size",
         "price", "rsi", "vwap_deviation_pct", "momentum_60s",
-        "data_points", "entry_window_open", "reasons"
+        "data_points", "entry_window_open", "interval_minutes", "reasons"
     ]
     
     ind = signal.get("indicators", {})
@@ -264,6 +311,7 @@ def log_signal(signal: Dict, filepath: str = "data/signals.csv"):
         "momentum_60s": ind.get("momentum_60s"),
         "data_points": ind.get("data_points"),
         "entry_window_open": entry.get("open"),
+        "interval_minutes": signal.get("interval_minutes", 15),
         "reasons": "; ".join(signal.get("reasons", []))
     }
     
@@ -282,17 +330,27 @@ def log_signal(signal: Dict, filepath: str = "data/signals.csv"):
         writer.writerow(row)
 
 
-def run_signal_check(csv_path: str = "data/btc_prices.csv", log_path: str = "data/signals.csv") -> Dict:
+def run_signal_check(csv_path: str = "data/btc_prices.csv", log_path: str = "data/signals.csv",
+                     interval_minutes: int = 15) -> Dict:
     """
     Run a complete signal check.
     
-    Returns signal dict and logs to CSV.
+    Args:
+        csv_path: Path to BTC price CSV file
+        log_path: Path to signal log CSV file
+        interval_minutes: 15 or 30 for 15-min or 30-min trading intervals
+    
+    Returns:
+        Signal dict and logs to CSV.
     """
-    # Get indicators
-    indicators = get_current_indicators(csv_path)
+    if interval_minutes not in [15, 30]:
+        raise ValueError(f"interval_minutes must be 15 or 30, got {interval_minutes}")
+    
+    # Get indicators (load data for the appropriate window)
+    indicators = get_current_indicators(csv_path, minutes=interval_minutes)
     
     # Generate signal
-    signal = generate_signal(indicators)
+    signal = generate_signal(indicators, interval_minutes=interval_minutes)
     
     # Log it
     log_signal(signal, log_path)
@@ -302,8 +360,22 @@ def run_signal_check(csv_path: str = "data/btc_prices.csv", log_path: str = "dat
 
 # Test
 if __name__ == "__main__":
-    print("Running signal check...")
-    signal = run_signal_check()
+    import sys
+    
+    # Check for interval argument
+    interval = 15
+    if len(sys.argv) > 1:
+        try:
+            interval = int(sys.argv[1])
+            if interval not in [15, 30]:
+                print(f"Invalid interval: {interval}. Must be 15 or 30. Using default 15.")
+                interval = 15
+        except ValueError:
+            print(f"Invalid interval argument: {sys.argv[1]}. Using default 15.")
+            interval = 15
+    
+    print(f"Running signal check ({interval}-min mode)...")
+    signal = run_signal_check(interval_minutes=interval)
     
     print("\n" + "="*50)
     print(format_signal_message(signal))

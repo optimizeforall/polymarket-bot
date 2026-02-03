@@ -269,17 +269,21 @@ class IndicatorCalculator:
         }
 
 
-def get_current_indicators(csv_path: str = "data/btc_prices.csv") -> Dict:
+def get_current_indicators(csv_path: str = "data/btc_prices.csv", minutes: int = 15) -> Dict:
     """
     Convenience function to get current indicators.
     
+    Args:
+        csv_path: Path to BTC price CSV file
+        minutes: Number of minutes of historical data to load (15 or 30)
+    
     Usage:
         from indicators import get_current_indicators
-        signals = get_current_indicators()
+        signals = get_current_indicators(minutes=30)  # For 30-min mode
         print(signals['rsi_14'], signals['vwap_deviation_pct'])
     """
     calc = IndicatorCalculator(csv_path)
-    if calc.load_data(minutes=15):
+    if calc.load_data(minutes=minutes):
         return calc.get_all_indicators()
     return {"error": "Failed to load price data"}
 

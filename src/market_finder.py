@@ -1,169 +1,245 @@
 """
-market_finder.py - Module to find active Polymarket markets
+market_finder.py - Find current BTC 15-min markets on Polymarket
 
-Handles fetching market data and identifying the current 15-minute BTC Up/Down market.
-Relies on the Polymarket Gamma API.
+Uses the Gamma API to find active BTC Up/Down markets.
+Reference: https://docs.polymarket.com/quickstart/fetching-data
 """
 
 import requests
-import time
+import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, List, Tuple
 
-# Polymarket API endpoints
-GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
+# Polymarket APIs
+GAMMA_API = "https://gamma-api.polymarket.com"
+CLOB_API = "https://clob.polymarket.com"
 
-def get_active_btc_15m_market_info() -> Optional[Dict[str, Any]]:
+# Series ID for BTC Up or Down 15m markets (found via /series endpoint)
+BTC_UP_DOWN_15M_SERIES_ID = 10192
+
+
+def get_active_btc_markets(limit: int = 50, interval_type: str = "15m") -> List[Dict]:
     """
-    Find the MOST RECENT active 15-minute BTC Up/Down market.
+    Get all active BTC Up/Down markets.
     
-    These markets typically follow a predictable naming pattern or have a tag
-    that can be used for filtering. We'll search for "BTC" and "15m", then
-    sort by end date or creation date to find the most current one.
+    Args:
+        limit: Max events to fetch
+        interval_type: "15m" for 15-minute markets (uses series_id)
     
     Returns:
-        A dictionary containing market info (token IDs, slug, etc.) or None.
+        List of market dicts with token IDs, sorted by end time
     """
-    print("Searching for active BTC 15m markets via Gamma API...")
-    
-    # Parameters to find recent, active crypto markets
-    # Note: 'search=BTC' might be too broad, need to refine.
-    # We are looking for markets like "BTC Up or Down - HH:MM-HH:MM ET"
-    # The exact slug or title pattern might need adjustment based on API responses.
-    
-    # Try to find active markets tagged 'crypto' and sorted by volume (desc)
     try:
-        response = requests.get(
-            f"{GAMMA_API_BASE_URL}/markets",
+        # Query events by series_id for BTC Up or Down 15m
+        # This is the correct way per Polymarket API docs
+        resp = requests.get(
+            f"{GAMMA_API}/events",
             params={
-                "active": True,
-                "tag": "crypto",
-                "limit": 10, # Fetch a few recent ones
-                "order": "volume24hr", # Sort by volume, might give recent active ones
-                "ascending": False
+                "series_id": BTC_UP_DOWN_15M_SERIES_ID,
+                "active": "true",
+                "closed": "false",
+                "limit": limit,
             },
-            timeout=10
+            timeout=30
         )
-        response.raise_for_status()
-        markets = response.json()
+        resp.raise_for_status()
+        events = resp.json()
         
-        if not markets or not isinstance(markets, list):
-            print("No markets found or invalid response from Gamma API.")
-            return None
+        btc_markets = []
+        now = datetime.now(timezone.utc)
+        
+        for event in events:
+            title = event.get('title', '')
             
-        # Iterate through markets to find the most relevant BTC 15m market
-        # We need a way to identify the CURRENT interval's market. Polymarket
-        # often uses specific date/time patterns in titles/slugs.
-        # For example: "Bitcoin Up or Down - Feb 3, 1:00PM-1:15PM ET"
-        
-        # Let's try to filter by title/slug containing "Bitcoin" (or "BTC") and "15m"
-        # and also check if the market's endDate is in the near future.
-        
-        now_utc = datetime.now(timezone.utc)
-        
-        relevant_markets = []
-        for market in markets:
-            title = market.get("title", "").lower()
-            slug = market.get("slug", "").lower()
-            end_date_str = market.get("endDate")
-            
-            if not end_date_str:
-                continue
-                
+            end_date_str = event.get('endDate', '')
             try:
-                # Attempt to parse endDate, assuming ISO format often used
-                end_date_dt = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
-            except ValueError:
-                continue # Skip if date format is unexpected
-            
-            # Check if market is active and relevant, and not yet resolved
-            if market.get("active") and not market.get("closed"):
-                # Look for Bitcoin and 15m in title/slug
-                if ("bitcoin" in title or "btc" in title or "bitcoin" in slug or "btc" in slug) and "15m" in title:
-                    # Check if the end date is soon, accounting for timezone.
-                    # We want the market that will resolve soonest *relative to current time*.
-                    # This logic might need fine-tuning. For now, prioritize markets ending today/tomorrow.
-                    time_until_end = (end_date_dt - now_utc).total_seconds()
+                end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                time_until_end = (end_date - now).total_seconds() / 60  # minutes
+                
+                # Skip markets that have already ended
+                if time_until_end <= 0:
+                    continue
                     
-                    # Basic filter: market ends within the next ~2 hours (covers several 15m intervals)
-                    if 0 < time_until_end < (2 * 60 * 60): # Between now and 2 hours from now
-                        relevant_markets.append((market, time_until_end))
-                        
-        if not relevant_markets:
-            print("No relevant active BTC 15m markets found with current filters.")
-            return None
+            except:
+                continue
             
-        # Sort by time_until_end to get the market that resolves soonest
-        relevant_markets.sort(key=lambda item: item[1])
+            markets = event.get('markets', [])
+            if not markets:
+                continue
+            
+            m = markets[0]
+            clob_tokens = m.get('clobTokenIds')
+            prices = m.get('outcomePrices')
+            
+            if clob_tokens:
+                tokens = json.loads(clob_tokens) if isinstance(clob_tokens, str) else clob_tokens
+                price_list = json.loads(prices) if prices and isinstance(prices, str) else prices
+                
+                if len(tokens) >= 2:
+                    # Get REAL-TIME prices from CLOB API (Gamma prices are cached/stale!)
+                    up_token = tokens[0]
+                    down_token = tokens[1]
+                    
+                    # Fetch live prices
+                    up_price = get_market_price(up_token)
+                    down_price = get_market_price(down_token)
+                    
+                    # Fallback to Gamma prices if CLOB fails
+                    if up_price is None:
+                        up_price = float(price_list[0]) if price_list else 0.5
+                    if down_price is None:
+                        down_price = float(price_list[1]) if price_list and len(price_list) > 1 else 0.5
+                    
+                    btc_markets.append({
+                        'title': title,
+                        'slug': event.get('slug'),
+                        'end_date': end_date_str,
+                        'time_until_end_min': time_until_end,
+                        'up_token': up_token,
+                        'down_token': down_token,
+                        'up_price': up_price,
+                        'down_price': down_price,
+                        'condition_id': m.get('conditionId'),
+                        'outcomes': m.get('outcomes'),
+                    })
         
-        most_relevant_market, _ = relevant_markets[0]
+        # Sort by end time (soonest first)
+        btc_markets.sort(key=lambda x: x['time_until_end_min'])
         
-        print(f"Found potential market: {most_relevant_market.get('title')} (Slug: {most_relevant_market.get('slug')})")
+        return btc_markets
         
-        # Extract token IDs for YES and NO outcomes.
-        # This requires knowing which outcome corresponds to YES/NO.
-        # The outcomePrices array often aligns with the outcomes array: price[0] for outcome[0].
-        # We need to inspect the structure for 'YES' and 'NO'.
-        # Let's assume outcomes are usually ["Yes", "No"] or similar.
-        
-        outcomes = json.loads(most_relevant_market.get("outcomes", "[]"))
-        outcome_prices = json.loads(most_relevant_market.get("outcomePrices", "[]"))
-        
-        yes_token_id = None
-        no_token_id = None
-        
-        if len(outcomes) == 2 and len(outcome_prices) == 2:
-            if outcomes[0].lower() == "yes":
-                yes_token_id = most_relevant_market.get("clobTokenIds", "[]").split(',')[0].strip('[]"\' ')
-                no_token_id = most_relevant_market.get("clobTokenIds", "[]").split(',')[1].strip('[]"\' ')
-            elif outcomes[1].lower() == "yes": # If 'No' is first
-                yes_token_id = most_relevant_market.get("clobTokenIds", "[]").split(',')[1].strip('[]"\' ')
-                no_token_id = most_relevant_market.get("clobTokenIds", "[]").split(',')[0].strip('[]"\' ')
-        
-        if yes_token_id and no_token_id:
-            return {
-                "title": most_relevant_market.get("title"),
-                "slug": most_relevant_market.get("slug"),
-                "yes_token_id": yes_token_id,
-                "no_token_id": no_token_id,
-                "end_time": end_date_dt,
-                "volume": most_relevant_market.get("volume")
-            }
-        else:
-            print("Could not extract YES/NO token IDs from market data.")
-            return None
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching markets from Gamma API: {e}")
-        return None
-    except json.JSONDecodeError:
-        print("Error decoding JSON response from Gamma API.")
-        return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return None
+        print(f"Error fetching markets: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 
-# --- Test ---
+def get_current_tradeable_market(min_time_remaining: int = 5, max_time_remaining: int = 45) -> Optional[Dict]:
+    """
+    Get the current BTC market that's optimal for trading.
+    
+    Args:
+        min_time_remaining: Minimum minutes until market ends (avoid last-minute trades)
+        max_time_remaining: Maximum minutes until market ends (trade current interval)
+    
+    Returns:
+        Market dict with token IDs, or None
+    """
+    markets = get_active_btc_markets()
+    
+    for market in markets:
+        time_left = market.get('time_until_end_min', 0)
+        
+        # Find market in the optimal trading window
+        if min_time_remaining <= time_left <= max_time_remaining:
+            return market
+    
+    return None
+
+
+def get_market_price(token_id: str, side: str = "buy") -> Optional[float]:
+    """
+    Get current price for a token.
+    
+    Args:
+        token_id: The CLOB token ID
+        side: "buy" or "sell"
+    
+    Returns:
+        Price as float, or None
+    """
+    try:
+        resp = requests.get(
+            f"{CLOB_API}/price",
+            params={"token_id": token_id, "side": side},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return float(resp.json().get('price', 0))
+    except:
+        pass
+    return None
+
+
+def get_orderbook(token_id: str) -> Optional[Dict]:
+    """
+    Get orderbook for a token.
+    
+    Returns:
+        Dict with bids and asks
+    """
+    try:
+        resp = requests.get(
+            f"{CLOB_API}/book",
+            params={"token_id": token_id},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except:
+        pass
+    return None
+
+
+def print_market_status():
+    """Print current market status"""
+    print(f"\n{'='*60}")
+    print(f"📊 BTC UP/DOWN MARKET STATUS")
+    print(f"{'='*60}")
+    print(f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+    
+    markets = get_active_btc_markets(limit=500, interval_type="15m")
+    
+    if not markets:
+        print("❌ No active BTC markets found")
+        return
+    
+    print(f"Found {len(markets)} active BTC markets:\n")
+    
+    for i, market in enumerate(markets[:5], 1):
+        time_left = market['time_until_end_min']
+        
+        # Status indicator
+        if time_left < 3:
+            status = "🔴 CLOSING"
+        elif time_left < 10:
+            status = "🟡 ENDING SOON"
+        elif time_left < 30:
+            status = "🟢 TRADEABLE"
+        else:
+            status = "⚪ UPCOMING"
+        
+        print(f"{i}. {status} {market['title']}")
+        print(f"   ⏰ Ends in {time_left:.1f} minutes")
+        
+        # Get prices
+        up_price = get_market_price(market['up_token'])
+        down_price = get_market_price(market['down_token'])
+        
+        if up_price is not None:
+            print(f"   📈 UP: {up_price:.2f} ({up_price*100:.0f}%)")
+        if down_price is not None:
+            print(f"   📉 DOWN: {down_price:.2f} ({down_price*100:.0f}%)")
+        
+        print()
+    
+    # Highlight best market for trading
+    tradeable = get_current_tradeable_market()
+    if tradeable:
+        print(f"{'='*60}")
+        print(f"✅ RECOMMENDED MARKET FOR TRADING:")
+        print(f"   {tradeable['title']}")
+        print(f"   Time remaining: {tradeable['time_until_end_min']:.1f} min")
+        print(f"\n   UP Token:   {tradeable['up_token']}")
+        print(f"   DOWN Token: {tradeable['down_token']}")
+        print(f"{'='*60}")
+
+
+def main():
+    """Display current market status"""
+    print_market_status()
+
+
 if __name__ == "__main__":
-    print("Testing market finder...")
-    
-    # Mocking the current time to simulate a mid-interval time
-    # In a real run, datetime.now(timezone.utc) is used.
-    mock_now = datetime(2026, 2, 3, 0, 5, 0, tzinfo=timezone.utc) # Simulate 00:05 UTC
-    
-    # We need to be careful with mocking datetime.now in tests
-    # For a simple script test, just calling the function is fine.
-    
-    market_info = get_active_btc_15m_market_info()
-    
-    if market_info:
-        print("\nFound active Bitcoin 15m market:")
-        print(f"  Title: {market_info.get('title')}")
-        print(f"  Slug: {market_info.get('slug')}")
-        print(f"  YES Token ID: {market_info.get('yes_token_id')}")
-        print(f"  NO Token ID: {market_info.get('no_token_id')}")
-        print(f"  Ends at: {market_info.get('end_time')}")
-        print(f"  Volume: {market_info.get('volume')}")
-    else:
-        print("Could not find an active BTC 15m market.")
+    main()

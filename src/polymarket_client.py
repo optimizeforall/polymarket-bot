@@ -9,6 +9,7 @@ POLYMARKET_FUNDER_ADDRESS=your_funder_address
 """
 
 import os
+from typing import Optional, Tuple, Dict, List
 from py_clob_client.client import ClobClient
 from decouple import config # Use decouple to load .env variables
 
