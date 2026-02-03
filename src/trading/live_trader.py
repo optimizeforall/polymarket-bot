@@ -140,10 +140,20 @@ class TelegramNotifier:
             print(f"[TELEGRAM DISABLED] {message[:100]}...")
             return
         try:
-            asyncio.get_event_loop().run_until_complete(self.send_async(message))
-        except RuntimeError:
-            # No event loop, create one
-            asyncio.run(self.send_async(message))
+            # Check if we're already in an async context
+            try:
+                asyncio.get_running_loop()
+                # We're in an async context, schedule in background thread
+                import threading
+                def run_in_thread():
+                    asyncio.run(self.send_async(message))
+                thread = threading.Thread(target=run_in_thread, daemon=True)
+                thread.start()
+            except RuntimeError:
+                # No event loop running, safe to use asyncio.run()
+                asyncio.run(self.send_async(message))
+        except Exception as e:
+            print(f"⚠️ Telegram send error: {e}")
 
 
 # =============================================================================
