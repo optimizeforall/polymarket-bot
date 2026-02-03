@@ -21,16 +21,42 @@ BOT_PID_FILE = PROJECT_ROOT / "bot.pid"
 LOG_DIR = PROJECT_ROOT / "logs"
 TRADES_FILE = PROJECT_ROOT / "data" / "live_trades.csv"
 
+def format_uptime(etime_str):
+    """Format ps etime output to readable format"""
+    if etime_str == 'N/A' or not etime_str:
+        return 'N/A'
+    
+    # ps etime format: [[DD-]hh:]mm:ss or mm:ss
+    parts = etime_str.split(':')
+    
+    if len(parts) == 2:
+        # mm:ss format
+        minutes, seconds = parts
+        return f"{int(minutes)}m {int(seconds)}s"
+    elif len(parts) == 3:
+        # hh:mm:ss format
+        hours, minutes, seconds = parts
+        return f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
+    elif '-' in etime_str:
+        # DD-hh:mm:ss format
+        day_part, time_part = etime_str.split('-', 1)
+        days = int(day_part)
+        time_parts = time_part.split(':')
+        if len(time_parts) == 3:
+            hours, minutes, seconds = time_parts
+            return f"{days}d {int(hours)}h {int(minutes)}m"
+    return etime_str
+
 def check_process():
-    """Check if bot process is running"""
+    """Check if bot process is running and calculate session uptime"""
     if not BOT_PID_FILE.exists():
         return None, "No PID file found"
     
     try:
         pid = int(BOT_PID_FILE.read_text().strip())
-        # Check if process exists
+        # Check if process exists and get elapsed time
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "pid,etime,cmd"],
+            ["ps", "-p", str(pid), "-o", "pid,etime"],
             capture_output=True,
             text=True
         )
@@ -40,7 +66,10 @@ def check_process():
             if len(lines) > 1:
                 # Process is running
                 info = lines[1].split()
-                return pid, f"Running (PID: {pid}, Uptime: {info[1] if len(info) > 1 else 'N/A'})"
+                if len(info) >= 2:
+                    etime = ' '.join(info[1:])
+                    uptime_formatted = format_uptime(etime)
+                    return pid, f"Running (PID: {pid}, Uptime: {uptime_formatted})"
         
         return pid, "Process not found (may have crashed)"
     except Exception as e:
